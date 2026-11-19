@@ -1,0 +1,64 @@
+services:
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "127.0.0.1:5432:5432"
+    container_name: crm_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgresql_crm.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [crm_net]
+
+  crm_app:
+    build: .
+    container_name: crm_app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD}
+      ZITADEL_ISSUER: ${ZITADEL_ISSUER:-https://auth.mesina.farm}
+      ZITADEL_CLIENT_ID: ${ZITADEL_CLIENT_ID}
+      ZITADEL_CLIENT_SECRET: ${ZITADEL_CLIENT_SECRET}
+      CRM_PUBLIC_URL: ${CRM_PUBLIC_URL:-https://crm.mesina.farm}
+      ZITADEL_REDIRECT_URI: ${ZITADEL_REDIRECT_URI:-https://crm.mesina.farm/api/auth/callback/zitadel}
+      ZITADEL_POST_LOGOUT_URI: ${ZITADEL_POST_LOGOUT_URI:-https://crm.mesina.farm}
+      ZITADEL_DEFAULT_CRM_ROLE: ${ZITADEL_DEFAULT_CRM_ROLE:-Sales Agent}
+      ZITADEL_BOOTSTRAP_ADMIN_EMAIL: ${ZITADEL_BOOTSTRAP_ADMIN_EMAIL:-}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      PGSSL: "false"
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [crm_net]
+
+volumes:
+  postgres_data:
+    name: crm_postgres_data
+networks:
+  crm_net:
+    name: crm_network
